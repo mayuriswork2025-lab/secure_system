@@ -3,11 +3,9 @@ import threading
 from typing import Dict, Tuple
 
 try:
-    from src.message_format import build_chat_message
     from src.protocol import MessageReader, ProtocolDecodeError, default_protocol
     from src.utils import log_message
 except ImportError:
-    from message_format import build_chat_message
     from protocol import MessageReader, ProtocolDecodeError, default_protocol
     from utils import log_message
 
@@ -28,18 +26,12 @@ def remove_client(connection: socket.socket) -> None:
         log_message(f"Client disconnected: {username}")
 
 
-def broadcast(message: str, sender_name: str, sender_connection: socket.socket) -> None:
-    packet = build_chat_message(sender_name, message)
+def _find_connection_by_username(username: str) -> socket.socket | None:
     with clients_lock:
-        targets = list(clients.items())
-
-    for connection, _ in targets:
-        if connection is sender_connection:
-            continue
-        try:
-            connection.sendall(packet)
-        except OSError:
-            remove_client(connection)
+        for connection, name in clients.items():
+            if name == username:
+                return connection
+    return None
 
 
 def _handle_login(connection: socket.socket, address: Tuple[str, int], payload: dict) -> str:
@@ -57,11 +49,33 @@ def _handle_login(connection: socket.socket, address: Tuple[str, int], payload: 
     return username
 
 
-def _handle_chat(connection: socket.socket, username: str, payload: dict) -> None:
+def _handle_chat(username: str, payload: dict) -> None:
     sender = payload.get("sender") or username or "anonymous"
+    target = payload.get("target")
     message = payload.get("message", "")
-    log_message(f"Message from {sender}: {message}")
-    broadcast(message, sender, connection)
+
+    log_message(f"Message from {sender} to {target}: {message}")
+
+    target_connection = _find_connection_by_username(target) if target else None
+    if target_connection is None:
+        log_message(f"Chat delivery failed: {target} is not connected")
+        return
+
+    target_connection.sendall(default_protocol.encode(payload))
+
+
+def _handle_dh_public(username: str, payload: dict) -> None:
+    sender = payload.get("sender") or username or "anonymous"
+    target = payload.get("target")
+
+    log_message(f"DH public value from {sender} for {target}")
+
+    target_connection = _find_connection_by_username(target) if target else None
+    if target_connection is None:
+        log_message(f"DH exchange failed: {target} is not connected")
+        return
+
+    target_connection.sendall(default_protocol.encode(payload))
 
 
 def handle_client(connection: socket.socket, address: Tuple[str, int]) -> None:
@@ -97,7 +111,9 @@ def handle_client(connection: socket.socket, address: Tuple[str, int]) -> None:
                 if message_type == "login":
                     username = _handle_login(connection, address, payload)
                 elif message_type == "chat":
-                    _handle_chat(connection, username, payload)
+                    _handle_chat(username, payload)
+                elif message_type == "dh_public":
+                    _handle_dh_public(username, payload)
                 elif message_type == "leave":
                     should_disconnect = True
                     break
