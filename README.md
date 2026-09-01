@@ -9,9 +9,16 @@ Syllabus coverage: Module 5
 
 ---
 
-## Phase 1 quick start
+## Quick start
 
-This repository is currently at Phase 1: a plaintext TCP messaging system.
+This repository is at Phase 2: TCP messaging plus a Diffie-Hellman key
+exchange between peers, relayed by the server. See `docs/protocol.md` for
+the full protocol description.
+
+Chat is peer-to-peer, not broadcast: you must complete a `/dh` handshake
+with a username before you can `/msg` them, and only that peer receives
+the message — other connected clients (or the server's log) don't see it
+routed to them.
 
 ### Run the server
 
@@ -21,7 +28,7 @@ From the project root:
 python src/server.py
 ```
 
-### Run the client
+### Run the clients
 
 Open a second terminal and start Alice:
 
@@ -35,12 +42,20 @@ Open a third terminal and start Bob:
 python src/client.py --username bob
 ```
 
-### Test the chat flow
+### Exchange keys, then chat
 
-In the Alice terminal, type:
+In the Alice terminal:
 
 ```text
-hello bob
+/dh bob
+```
+
+Both terminals print the public value they received from the other side,
+followed by the derived session key in hex — the two should match. Then,
+in the Alice terminal:
+
+```text
+/msg bob hello bob
 ```
 
 In the Bob terminal, you should see:
@@ -49,11 +64,19 @@ In the Bob terminal, you should see:
 [alice] hello bob
 ```
 
-You can also send a one-off message without interactive mode:
+Trying `/msg` with a peer you haven't run `/dh` with first is rejected
+client-side with an error, rather than sent.
+
+### One-shot mode
+
+Send a single message and exit, performing the handshake automatically
+first (the target peer must already be connected and listening):
 
 ```bash
-python src/client.py --username alice --message "hello from alice"
+python src/client.py --username alice --target bob --message "hello from alice"
 ```
+
+### Exit
 
 To exit a client, type:
 
@@ -65,6 +88,15 @@ To stop the server, press:
 
 ```text
 Ctrl+C
+```
+
+### Try the key exchange standalone
+
+No server or second client needed — this simulates both sides locally and
+prints the two independently derived shared secrets:
+
+```bash
+python src/dh.py
 ```
 
 ---
