@@ -9,6 +9,66 @@ Syllabus coverage: Module 5
 
 ---
 
+## Phase 1 quick start
+
+This repository is currently at Phase 1: a plaintext TCP messaging system.
+
+### Run the server
+
+From the project root:
+
+```bash
+python src/server.py
+```
+
+### Run the client
+
+Open a second terminal and start Alice:
+
+```bash
+python src/client.py --username alice
+```
+
+Open a third terminal and start Bob:
+
+```bash
+python src/client.py --username bob
+```
+
+### Test the chat flow
+
+In the Alice terminal, type:
+
+```text
+hello bob
+```
+
+In the Bob terminal, you should see:
+
+```text
+[alice] hello bob
+```
+
+You can also send a one-off message without interactive mode:
+
+```bash
+python src/client.py --username alice --message "hello from alice"
+```
+
+To exit a client, type:
+
+```text
+quit
+```
+
+To stop the server, press:
+
+```text
+Ctrl+C
+```
+
+---
+
 ## 1. Project Objective
 
 Build an end-to-end encrypted messaging system in which the team implements the complete security workflow:
