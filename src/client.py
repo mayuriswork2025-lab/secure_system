@@ -10,12 +10,18 @@ except ImportError:
     from message_format import build_chat_message, build_login_message
     from protocol import MessageReader, ProtocolDecodeError, default_protocol
 
+RECV_BUFFER_SIZE = 4096
+
 
 def receive_messages(sock: socket.socket) -> None:
+    # TCP is a byte stream, not a message stream: one recv() can return part
+    # of a message, several messages, or both. MessageReader buffers raw
+    # bytes and only hands back frames once a full delimiter-terminated
+    # message has arrived.
     reader = MessageReader(default_protocol)
     while True:
         try:
-            data = sock.recv(4096)
+            data = sock.recv(RECV_BUFFER_SIZE)
             if not data:
                 break
 
