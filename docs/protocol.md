@@ -34,6 +34,10 @@ values is standard practice and does not weaken the exchange — DH's
 security rests on the discrete-log problem being hard for this group, not
 on the group being secret.
 
+See `docs/phase-2-dh-key-exchange.md` for a short, beginner-friendly
+explanation of how the exchange works before diving into the wire-level
+walkthrough below.
+
 **Handshake (2 messages):**
 
 ```
