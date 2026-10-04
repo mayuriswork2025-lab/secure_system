@@ -17,16 +17,16 @@ without changing anything else in `server.py` or `client.py`.
 |-------------|--------------------|-------------------------------------------|---------|
 | `login`     | client -> server   | `username`                                | Registers the connection under a username. |
 | `system`    | server -> client   | `sender`, `message`                       | Server-generated notices (e.g. welcome message). |
-| `chat`      | client -> server -> one client | `sender`, `target`, `message` | Plaintext chat message, relayed by the server to `target` only (unicast). The client rejects sending one before a `/dh` handshake with `target` has produced a session key. |
+| `chat`      | client -> server -> one client | `sender`, `target`, `nonce`, `ciphertext`, `signature` | AES-256-GCM encrypted, Ed25519-signed chat message, relayed by the server to `target` only (unicast). There is no plaintext field. The client refuses to send one before a `/dh` handshake with `target` has produced a session key. |
 | `leave`     | client -> server   | (none)                                     | Client is disconnecting; server closes the connection. |
-| `dh_public` | client -> server -> one client | `sender`, `target`, `public_key` | Diffie-Hellman public value, relayed by the server to `target` only (unicast, not broadcast). |
+| `dh_public` | client -> server -> one client | `sender`, `target`, `public_key`, `signing_key`, `signature` | Diffie-Hellman public value plus the sender's Ed25519 public signing key, signed by that key. Relayed by the server to `target` only (unicast, not broadcast). |
 
 ## Diffie-Hellman key exchange
 
 Goal: two clients (Alice and Bob) derive a shared secret without ever
 putting that secret on the wire. Implemented in `src/dh.py`; the network
 handshake lives in `client.py`'s `/dh <username>` command and
-`_handle_dh_public`.
+`ChatClient.handle_dh_public`.
 
 **Group parameters.** Both parties use the same publicly known (p, g):
 RFC 3526's 2048-bit MODP Group 14, with generator `g = 2`. Publishing these
@@ -34,7 +34,7 @@ values is standard practice and does not weaken the exchange — DH's
 security rests on the discrete-log problem being hard for this group, not
 on the group being secret.
 
-See `docs/phase-2-dh-key-exchange.md` for a short, beginner-friendly
+See `docs/phases/phase-2-dh-key-exchange.md` for a short, beginner-friendly
 explanation of how the exchange works before diving into the wire-level
 walkthrough below.
 
@@ -82,15 +82,89 @@ two `client.py` instances and typing `/dh <peer>` performs the same
 exchange for real, over the socket connection, and prints the resulting
 session key hex on both sides so they can be compared by eye.
 
+## Session encryption and signatures (phase 3)
+
+Goal: chat content is unreadable to the server, and the receiver can
+prove who sent a message and that nobody changed it. Implemented in
+`src/crypto.py` (AES-256-GCM) and `src/signing.py` (Ed25519). See
+`docs/phases/phase-3-aes-encryption-and-signatures.md` for a beginner-friendly
+explanation.
+
+**Keys involved:**
+
+| Key | Type | Lifetime | Used for |
+|-----|------|----------|----------|
+| Session key | 32-byte AES key, `SHA-256(DH shared secret)` | One per peer per handshake | Encrypting chat content |
+| Identity key pair | Ed25519 | One per client process | Signing DH values and chat messages |
+
+**Signed handshake.** Each `dh_public` message now also carries the
+sender's Ed25519 public key (`signing_key`) and a `signature` over
+`{type, sender, target, public_key, signing_key}`. The receiver verifies
+that signature before using the DH value, and rejects the message if it
+fails or if `target` isn't its own username. On success it stores
+`signing_key` as that peer's identity key for later chat messages.
+
+**Sending a chat message** (`ChatClient.seal_chat`):
+
+1. Encrypt the text with AES-256-GCM under the peer's session key, with a
+   fresh random 12-byte nonce. Associated data is `chat|<sender>|<target>`,
+   so the ciphertext only decrypts for that exact sender and target pair.
+2. Sign `{type, sender, target, nonce, ciphertext}` with the sender's
+   Ed25519 private key (encrypt-then-sign).
+3. Send `nonce`, `ciphertext` and `signature` base64-encoded. No plaintext
+   goes on the wire.
+
+**Receiving a chat message** (`ChatClient.open_chat`), in this order:
+
+1. `target` must be our own username.
+2. We must hold a session key and a signing key for `sender`.
+3. The signature must verify under `sender`'s stored signing key.
+4. GCM decryption must succeed. This also re-checks integrity and the
+   sender/target binding.
+
+If any step fails, the message is dropped and the client prints
+`[security] Rejected message from <sender>: <reason>`. The text is never
+shown.
+
+Signatures are serialized canonically (`json.dumps` with sorted keys and
+fixed separators) so the signer and verifier sign and check identical
+bytes.
+
+**Why both GCM and signatures?** GCM's tag proves the message came from
+*someone holding the session key*, which after a MITM'd handshake could be
+the attacker. The signature proves it came from the holder of a specific
+identity key. Once phase 4 binds that key to a username through the CA,
+that means it came from that user.
+
+**Validation:**
+
+```bash
+python -m unittest discover tests -v
+```
+
+`tests/test_encryption_and_signing.py` performs a full alice/bob handshake
+in-process, checks that Bob decrypts and verifies Alice's message, and
+confirms that each of these is rejected: a flipped ciphertext byte, a
+flipped nonce byte, a message signed by a different key claiming to be
+Alice, a message from a peer with no session, and a tampered DH public
+value. `python src/crypto.py` and `python src/signing.py` run small
+standalone demos.
+
 ## Known limitations (carried forward to later phases)
 
-- No authentication of the public values: a man-in-the-middle relay (the
-  server, or an attacker who compromises it) could substitute its own
-  public value for Alice's or Bob's and complete two separate handshakes,
-  reading everything in between. This is the classic DH MITM weakness and
-  is exactly what phase 5's adversarial test is meant to demonstrate.
-  Phases 3 and 4 (signatures, certificates) exist to close this gap.
-- The relayed `dh_public` message is not itself authenticated or
-  encrypted — the server (or anyone impersonating it) can read the public
-  values in transit, though per the DH problem this alone doesn't reveal
-  the shared secret.
+- **Signing keys are not yet bound to identities.** The `signing_key` in
+  `dh_public` is accepted on first sight. A man-in-the-middle (the server,
+  or an attacker who compromises it) can still replace both the DH value
+  *and* the signing key with its own, re-sign, and complete two separate
+  handshakes. Signatures stop tampering with messages *after* the
+  handshake, but not impersonation *during* it. Phase 4's certificate
+  authority closes this gap by binding each signing key to a username.
+  Phase 5's adversarial test demonstrates the difference.
+- **No replay protection.** A captured, validly signed chat message can be
+  re-delivered and will verify again. Sequence numbers or timestamps
+  inside the signed fields would prevent this.
+- **Identity keys are in memory only.** A new key pair is generated every
+  time a client starts, so peers can't recognise a returning user across
+  restarts. Phase 4 moves keys into issued certificates.
+- **Metadata is visible.** The server still sees who talks to whom, when,
+  and roughly how long each message is. Only the content is protected.

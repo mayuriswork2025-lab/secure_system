@@ -12,21 +12,41 @@ def build_login_message(username: str) -> bytes:
     return default_protocol.encode(payload)
 
 
-def build_chat_message(sender: str, target: str, message: str) -> bytes:
+def build_chat_message(sender: str, target: str, nonce: str, ciphertext: str, signature: str) -> bytes:
     payload = {
         "type": "chat",
         "sender": sender,
         "target": target,
-        "message": message,
+        "nonce": nonce,
+        "ciphertext": ciphertext,
+        "signature": signature,
     }
     return default_protocol.encode(payload)
 
 
-def build_dh_public_message(sender: str, target: str, public_key: int) -> bytes:
+def build_dh_public_message(sender: str, target: str, public_key: int, signing_key: str, signature: str) -> bytes:
     payload = {
         "type": "dh_public",
         "sender": sender,
         "target": target,
         "public_key": str(public_key),
+        "signing_key": signing_key,
+        "signature": signature,
     }
     return default_protocol.encode(payload)
+
+
+def chat_signed_fields(sender: str, target: str, nonce: str, ciphertext: str) -> dict:
+    """The chat fields covered by the sender's signature (everything except the signature)."""
+    return {"type": "chat", "sender": sender, "target": target, "nonce": nonce, "ciphertext": ciphertext}
+
+
+def dh_public_signed_fields(sender: str, target: str, public_key: int, signing_key: str) -> dict:
+    """The dh_public fields covered by the sender's signature."""
+    return {
+        "type": "dh_public",
+        "sender": sender,
+        "target": target,
+        "public_key": str(public_key),
+        "signing_key": signing_key,
+    }

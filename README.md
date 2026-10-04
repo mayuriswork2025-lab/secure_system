@@ -11,9 +11,16 @@ Syllabus coverage: Module 5
 
 ## Quick start
 
-This repository is at Phase 2: TCP messaging plus a Diffie-Hellman key
-exchange between peers, relayed by the server. See `docs/protocol.md` for
-the full protocol description.
+This repository is at Phase 3: TCP messaging, a signed Diffie-Hellman
+key exchange between peers, and chat messages that are AES-256-GCM
+encrypted and Ed25519 signed end to end. The server relays ciphertext it
+cannot read. See `docs/protocol.md` for the full protocol description.
+
+### Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
 
 Chat is peer-to-peer, not broadcast: you must complete a `/dh` handshake
 with a username before you can `/msg` them, and only that peer receives
@@ -61,8 +68,12 @@ in the Alice terminal:
 In the Bob terminal, you should see:
 
 ```text
-[alice] hello bob
+[alice] hello bob  (signature verified)
 ```
+
+The server terminal only logs the ciphertext it relayed, never the text.
+If a message fails signature verification or decryption, the receiver
+prints `[security] Rejected message from <sender>: <reason>` instead.
 
 Trying `/msg` with a peer you haven't run `/dh` with first is rejected
 client-side with an error, rather than sent.
@@ -90,13 +101,25 @@ To stop the server, press:
 Ctrl+C
 ```
 
-### Try the key exchange standalone
+### Run the tests
+
+```bash
+python -m unittest discover tests -v
+```
+
+These cover encryption round-trips, signature checks, and tampering
+(flipped ciphertext bytes, forged senders, altered DH values) being
+rejected.
+
+### Try the crypto standalone
 
 No server or second client needed — this simulates both sides locally and
 prints the two independently derived shared secrets:
 
 ```bash
 python src/dh.py
+python src/crypto.py
+python src/signing.py
 ```
 
 ---

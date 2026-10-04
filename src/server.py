@@ -14,6 +14,7 @@ PORT = 9000
 LISTEN_BACKLOG = 5
 RECV_BUFFER_SIZE = 4096
 SOCKET_TIMEOUT_SECONDS = 1.0
+LOG_PREVIEW_CHARS = 32
 
 class ClientRegistry:
     """Thread-safe mapping of connected sockets to usernames."""
@@ -128,7 +129,11 @@ class ChatServer:
         target = payload.get("target")
 
         if payload.get("type") == "chat":
-            log_message(f"{label} from {sender} to {target}: {payload.get('message', '')}")
+            # The server only ever sees ciphertext; logging it shows what an
+            # eavesdropper on the relay would see.
+            ciphertext = payload.get("ciphertext", "")
+            preview = ciphertext[:LOG_PREVIEW_CHARS] + ("..." if len(ciphertext) > LOG_PREVIEW_CHARS else "")
+            log_message(f"{label} from {sender} to {target}: ciphertext={preview}")
         else:
             log_message(f"{label} from {sender} for {target}")
 
